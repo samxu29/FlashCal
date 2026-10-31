@@ -190,7 +190,7 @@ fun ControlsPagePreview() {
             Modifier.align(Alignment.Center).offset(y = 52.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            DistancePill("2.4")
+            DistancePill("2.4", held = true)
             Text(
                 stringResource(R.string.distance_secondary, distanceText(2.4f, DistanceUnit.FEET), stringResource(R.string.source_held)),
                 color = Color.White.copy(alpha = 0.9f),
@@ -227,7 +227,7 @@ fun DialsPageRows() {
 fun ControlsPageRows() {
     val slot = 132.dp
     FeatureRow(R.string.onboard_controls_fixed, slot) { GlassCircle(Icons.Outlined.Straighten, dark = true) }
-    FeatureRow(R.string.onboard_controls_hold, slot) { DarkChip { DistancePill("2.4", compact = true) } }
+    FeatureRow(R.string.onboard_controls_hold, slot) { DarkChip { DistancePill("2.4", compact = true, held = true) } }
     FeatureRow(R.string.onboard_controls_light, slot) { GlassCircle(Icons.Outlined.FlashlightOff, dark = true) }
     FeatureRow(R.string.onboard_controls_warning, slot) {
         WarningPill(stringResource(R.string.onboard_warning_sample))
@@ -288,16 +288,16 @@ private fun CenterCross(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DistancePill(meters: String, compact: Boolean = false) {
+private fun DistancePill(meters: String, compact: Boolean = false, held: Boolean = false) {
     Text(
         stringResource(R.string.distance_with_unit, meters, unitSymbol(DistanceUnit.METERS)),
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(ScreenGlass)
+            .background(if (held) Color.White.copy(alpha = 0.92f) else ScreenGlass)
             .padding(horizontal = if (compact) 8.dp else 12.dp, vertical = if (compact) 4.dp else 6.dp),
-        color = Color.White,
+        color = if (held) Color.Black else Color.White,
         style = (if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge)
-            .copy(fontFeatureSettings = "tnum", fontWeight = FontWeight.Medium),
+            .copy(fontFeatureSettings = "tnum", fontWeight = if (held) FontWeight.SemiBold else FontWeight.Medium),
     )
 }
 

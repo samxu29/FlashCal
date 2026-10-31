@@ -105,7 +105,6 @@ fun UnitSettings(settings: GearSettingsState) {
                 }
             }
         }
-        Hint(stringResource(R.string.distance_unit_help))
     }
 }
 

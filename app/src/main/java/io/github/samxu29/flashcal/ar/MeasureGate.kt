@@ -1,12 +1,26 @@
+/**
+ * Turns per-frame center distances into the reading shown on screen.
+ *
+ * Readings are the median of the last 300 ms of samples from one source, so single-frame spikes are dropped and a new scene takes
+ * over within a few frames instead of being averaged with the old one.
+ *
+ * If ARCore tracked and then stays lost for 4 s (typically
+ * after walking somewhere new), [sessionGeneration] is bumped so the AR view
+ * rebuilds its session. Low light and featureless surfaces are left alone;
+ * a new session would not track there either. [resetMeasurement] does the
+ * same restart on demand from the reset button.
+ */
 package io.github.samxu29.flashcal.ar
 
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import com.google.ar.core.Frame
 import com.google.ar.core.TrackingFailureReason
+import com.google.ar.core.TrackingState
 import kotlin.math.roundToInt
 
 @Stable
@@ -18,6 +32,7 @@ class MeasureGate {
     val arBlocked = mutableStateOf(false)
     val sessionFailed = mutableStateOf(false)
     val cameraReady = mutableStateOf(false)
+    val sessionGeneration = mutableIntStateOf(0)
 
     @Volatile var locked: Boolean = false
     @Volatile var measuring: Boolean = true
@@ -29,6 +44,8 @@ class MeasureGate {
     private var lastTenths = Int.MIN_VALUE
     private var lastSource: DistanceSource? = null
     private var lastFocusAt = 0L
+    private var hasTracked = false
+    private var lostSince = 0L
 
     fun onSize(width: Int, height: Int) {
         this.width = width
@@ -39,8 +56,9 @@ class MeasureGate {
 
     fun onFrame(frame: Frame) {
         if (frame.timestamp > 0L) postState(cameraReady, true)
-        if (width == 0 || height == 0) return
         val now = SystemClock.elapsedRealtime()
+        if (restartIfLost(frame, now)) return
+        if (width == 0 || height == 0) return
         // Camera AF keeps running while distance is fixed or held.
         if (now - lastFocusAt >= 100L || frame.hasDisplayGeometryChanged()) {
             lastFocusAt = now
@@ -54,10 +72,7 @@ class MeasureGate {
 
     fun pauseMeasurement() {
         measuring = false
-        filter.reset()
-        lastTenths = Int.MIN_VALUE
-        lastSource = null
-        postState(reading, null)
+        clearReading()
     }
 
     fun resumeMeasurement() {
@@ -81,6 +96,41 @@ class MeasureGate {
     fun markSessionFailed() {
         postState(focusRegions, emptyList())
         postState(sessionFailed, true)
+    }
+
+    private fun restartIfLost(frame: Frame, now: Long): Boolean {
+        val camera = frame.camera
+        if (camera.trackingState == TrackingState.TRACKING) {
+            hasTracked = true
+            lostSince = 0L
+            return false
+        }
+        if (!hasTracked || !measuring || locked || camera.trackingFailureReason in NOT_RESTARTABLE) {
+            lostSince = 0L
+            return false
+        }
+        if (lostSince == 0L) lostSince = now
+        if (now - lostSince < RESTART_AFTER_MS) return false
+        resetMeasurement()
+        return true
+    }
+
+    /** Drops the current reading and starts a fresh ARCore session. */
+    fun resetMeasurement() {
+        locked = false
+        hasTracked = false
+        lostSince = 0L
+        clearReading()
+        postState(focusRegions, emptyList())
+        postState(failure, null)
+        postState(sessionGeneration, sessionGeneration.intValue + 1)
+    }
+
+    private fun clearReading() {
+        filter.reset()
+        lastTenths = Int.MIN_VALUE
+        lastSource = null
+        postState(reading, null)
     }
 
     private fun publish(sample: DistanceReading?) {
@@ -107,40 +157,57 @@ class MeasureGate {
             mainHandler.post { state.value = value }
         }
     }
+
+    private companion object {
+        const val RESTART_AFTER_MS = 4_000L
+        val NOT_RESTARTABLE = setOf(
+            TrackingFailureReason.INSUFFICIENT_LIGHT,
+            TrackingFailureReason.INSUFFICIENT_FEATURES,
+            TrackingFailureReason.CAMERA_UNAVAILABLE,
+        )
+    }
 }
 
-private class DistanceFilter {
-    private var meters: Float? = null
-    private var source: DistanceSource = DistanceSource.DEPTH
-    private var depthAt: Long = 0L
-    private var lastAt: Long = 0L
+internal class DistanceFilter {
+    private class Sample(val at: Long, val meters: Float)
+
+    private val window = ArrayDeque<Sample>()
+    private var source: DistanceSource? = null
+    private var held: DistanceReading? = null
+    private var depthAt = 0L
+    private var lastAt = 0L
 
     fun reset() {
-        meters = null
-        source = DistanceSource.DEPTH
+        window.clear()
+        source = null
+        held = null
         depthAt = 0L
         lastAt = 0L
     }
 
     fun update(sample: DistanceReading?, now: Long): DistanceReading? {
         if (sample == null) {
-            if (now - lastAt > HOLD_MS) meters = null
-            val held = meters ?: return null
-            return DistanceReading(held, source)
+            if (now - lastAt > HOLD_MS) held = null
+            return held
+        }
+        if (sample.source == DistanceSource.DEPTH) {
+            depthAt = now
+        } else if (source == DistanceSource.DEPTH && now - depthAt <= DEPTH_STICK_MS) {
+            return held
         }
         lastAt = now
-        if (sample.source == DistanceSource.DEPTH) {
-            source = DistanceSource.DEPTH
-            depthAt = now
-        } else if (now - depthAt > DEPTH_STICK_MS) {
+        if (sample.source != source) {
+            window.clear()
             source = sample.source
         }
-        val previous = meters
-        meters = if (previous == null) sample.meters else previous + (sample.meters - previous) * 0.4f
-        return DistanceReading(meters ?: return null, source)
+        window.addLast(Sample(now, sample.meters))
+        while (window.first().at < now - WINDOW_MS) window.removeFirst()
+        val sorted = window.map { it.meters }.sorted()
+        return DistanceReading(sorted[sorted.size / 2], sample.source).also { held = it }
     }
 
     private companion object {
+        const val WINDOW_MS = 300L
         const val HOLD_MS = 600L
         const val DEPTH_STICK_MS = 400L
     }

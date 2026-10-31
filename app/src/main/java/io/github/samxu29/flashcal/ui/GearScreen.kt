@@ -134,6 +134,7 @@ private fun ProfileList(
                 Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
                 Text(stringResource(R.string.settings_intro), style = MaterialTheme.typography.bodyLarge)
             }
+            UnitSettings(settings)
             OutlinedButton(onClick = confirmationClick(onCreate), modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.profile_new))
             }
@@ -163,7 +164,7 @@ private fun ProfileList(
                         ) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(name, style = MaterialTheme.typography.titleMedium)
-                                val unit = if (selected) settings.distanceUnit else profile.distanceScale.unit
+                                val unit = settings.distanceUnit
                                 val gnText = if (selected) settings.guideNumberText else profile.guideNumberText
                                 Text(
                                     stringResource(
@@ -234,7 +235,6 @@ private fun ProfileEditor(
             label = { Text(stringResource(R.string.profile_name)) },
             singleLine = true,
         )
-        UnitSettings(settings)
         FlashSettings(settings)
         FilmSettings(settings)
         ApertureRangeSettings(settings)

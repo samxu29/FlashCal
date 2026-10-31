@@ -24,7 +24,7 @@
     <string name="onboard_dials_set">Set that power on the flash</string>
     <string name="onboard_controls_title">Distance and light controls</string>
     <string name="onboard_controls_fixed">Fixed distance on or off</string>
-    <string name="onboard_controls_hold">Tap the distance to hold it, or swipe down</string>
+    <string name="onboard_controls_hold">Tap the distance to hold it</string>
     <string name="onboard_controls_light">Phone light for dark rooms</string>
     <string name="onboard_controls_warning">Out of range: use the f-number shown</string>
     <string name="onboard_warning_sample">Too far</string>
@@ -89,6 +89,7 @@
     <string name="torch_off">Turn the camera light off</string>
     <string name="hold_distance">Hold this distance</string>
     <string name="release_distance">Release the distance</string>
+    <string name="reset_measurement">Restart measuring</string>
     <string name="center_mark">Distance target. Camera autofocus is separate.</string>
     <string name="camera_focus_area">Camera-reported autofocus metering area</string>
     <string name="measure_searching">Measuring…</string>
@@ -108,7 +109,7 @@
     <string name="kit_intro">Manual flash math for this body and this flash. The meter in the FM does not read the iM30.</string>
     <string name="how_to_title">How to shoot</string>
     <string name="how_to_body">Set the film ISO here and on the FM ASA ring. Seat the iM30 fully on the hot shoe and leave S1/S2 off. Scroll the aperture dial on Measure and set the flash power the app shows. Use the top-left ruler button for fixed distance, then scroll the distance dial above the aperture. Shutter speed does not change the flash exposure. Use any sync speed, 1/125 or slower. At full power, wait about 3.6 seconds for recycle.</string>
-    <string name="settings_title">Profiles</string>
+    <string name="settings_title">Settings</string>
     <string name="settings_intro">Measure uses the profile you open.</string>
     <string name="show_onboarding">Show getting started again</string>
     <string name="profile_back">Back</string>
@@ -140,7 +141,6 @@
     <string name="aperture_type_help">Type any f/0.7–128, or pick from the list</string>
     <string name="aperture_value_error">Use f/0.7–128</string>
     <string name="aperture_order_error">Out of order</string>
-    <string name="distance_unit_help">Used for the distance dial, readings, and guide number.</string>
     <string name="fm_title">Nikon FM</string>
     <string name="im30_title">Godox iM30</string>
     <string name="spec_shutter">Shutter</string>

@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -76,19 +77,22 @@ fun ArMeasureView(
         { _: Exception -> gate.markSessionFailed() }
     }
 
-    ARSceneView(
-        modifier = modifier.onSizeChanged { gate.onSize(it.width, it.height) },
-        sessionCameraConfig = null,
-        flashMode = if (torch) Config.FlashMode.TORCH else Config.FlashMode.OFF,
-        depthMode = Config.DepthMode.AUTOMATIC,
-        planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
-        focusMode = Config.FocusMode.AUTO,
-        planeRenderer = false,
-        sceneUnderstanding = SceneUnderstanding.None,
-        onSessionUpdated = onFrame,
-        onTrackingFailureChanged = onFailure,
-        onCameraPermissionStateChanged = onCameraPermission,
-        onARCoreAvailability = onAvailability,
-        onSessionFailed = onFailed,
-    )
+    val generation by gate.sessionGeneration
+    key(generation) {
+        ARSceneView(
+            modifier = modifier.onSizeChanged { gate.onSize(it.width, it.height) },
+            sessionCameraConfig = null,
+            flashMode = if (torch) Config.FlashMode.TORCH else Config.FlashMode.OFF,
+            depthMode = Config.DepthMode.AUTOMATIC,
+            planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
+            focusMode = Config.FocusMode.AUTO,
+            planeRenderer = false,
+            sceneUnderstanding = SceneUnderstanding.None,
+            onSessionUpdated = onFrame,
+            onTrackingFailureChanged = onFailure,
+            onCameraPermissionStateChanged = onCameraPermission,
+            onARCoreAvailability = onAvailability,
+            onSessionFailed = onFailed,
+        )
+    }
 }

@@ -13,8 +13,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FlashlightOff
 import androidx.compose.material.icons.outlined.FlashlightOn
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
@@ -50,7 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -76,7 +74,6 @@ import io.github.samxu29.flashcal.ar.ArMeasureView
 import io.github.samxu29.flashcal.ar.DistanceSource
 import io.github.samxu29.flashcal.ar.FocusRegion
 import io.github.samxu29.flashcal.ar.MeasureGate
-import kotlin.math.abs
 import io.github.samxu29.flashcal.data.GearSettingsState
 import io.github.samxu29.flashcal.domain.DistanceUnit
 import io.github.samxu29.flashcal.domain.FlashMath
@@ -85,6 +82,7 @@ import com.google.ar.core.TrackingFailureReason
 
 private val HudWhite = Color.White
 private val Glass = Color.White.copy(alpha = 0.18f)
+private val HeldFill = Color.White.copy(alpha = 0.92f)
 private val WarningAmber = Color(0xFFFFE082)
 private val ReadoutShadow = Shadow(color = Color.Black.copy(alpha = 0.7f), offset = Offset(0f, 1f), blurRadius = 8f)
 
@@ -128,9 +126,6 @@ fun MeasureScreen(
             gate.resumeMeasurement()
         }
     }
-    val lockedState = rememberUpdatedState(locked)
-    val manualState = rememberUpdatedState(manual)
-    val readingState = rememberUpdatedState(reading?.meters != null)
 
     SystemBarIconStyle(onDarkBackground = true)
 
@@ -141,34 +136,6 @@ fun MeasureScreen(
             modifier = Modifier.fillMaxSize(),
         )
         if (showChrome) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        val swipe = 72.dp.toPx()
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            var dx = 0f
-                            var dy = 0f
-                            val canHold = !manualState.value && readingState.value
-                            val held = lockedState.value
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                if (event.changes.size != 1) break
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if (change.isConsumed) break
-                                if (!change.pressed) break
-                                val delta = change.position - change.previousPosition
-                                dx += delta.x
-                                dy += delta.y
-                                if (dy < swipe || abs(dy) < abs(dx)) continue
-                                change.consume()
-                                if (canHold) locked = !held
-                                break
-                            }
-                        }
-                    },
-            )
             CameraFocusOverlay(focusRegions)
             ArMeasureIndicator(
                 meters = reading?.meters,
@@ -195,6 +162,20 @@ fun MeasureScreen(
                     .statusBarsPadding()
                     .padding(top = 12.dp, end = 16.dp),
             )
+            if (!manual) {
+                GlassButton(
+                    onClick = {
+                        locked = false
+                        gate.resetMeasurement()
+                    },
+                    icon = Icons.Outlined.Refresh,
+                    description = stringResource(R.string.reset_measurement),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 72.dp, end = 16.dp),
+                )
+            }
         }
         GlassButton(
             onClick = {
@@ -549,18 +530,18 @@ private fun BoxScope.ArMeasureIndicator(
                 modifier = Modifier
                     .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Glass)
+                    .background(if (locked) HeldFill else Glass)
                     .clickable(onClick = confirmationClick(onToggleHold))
                     .semantics {
                         role = Role.Button
                         contentDescription = "$holdAction. $description"
                     }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
-                color = HudWhite,
+                color = if (locked) Color.Black else HudWhite,
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontFeatureSettings = "tnum",
-                    fontWeight = FontWeight.Medium,
-                    shadow = ReadoutShadow,
+                    fontWeight = if (locked) FontWeight.SemiBold else FontWeight.Medium,
+                    shadow = if (locked) null else ReadoutShadow,
                 ),
             )
             Text(
@@ -569,8 +550,11 @@ private fun BoxScope.ArMeasureIndicator(
                     distanceText(meters, unit.other),
                     distanceCaption(source, locked),
                 ),
-                color = HudWhite.copy(alpha = 0.92f),
-                style = MaterialTheme.typography.labelLarge.copy(shadow = ReadoutShadow),
+                color = HudWhite.copy(alpha = if (locked) 1f else 0.92f),
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = if (locked) FontWeight.SemiBold else null,
+                    shadow = ReadoutShadow,
+                ),
                 textAlign = TextAlign.Center,
             )
         } else if (warning != null) {

@@ -35,6 +35,7 @@ private const val KEY_APERTURE = "target_aperture"
 private const val KEY_APERTURE_OPTIONS = "aperture_options"
 private const val KEY_PROFILES = "profiles"
 private const val KEY_ACTIVE = "active_profile"
+private const val KEY_UNIT = "distance_unit"
 
 private val DEFAULT_APERTURES = setOf("1.4", "2", "2.8", "4", "5.6", "8", "11", "16")
 
@@ -119,14 +120,16 @@ class GearSettingsState(
     val guideNumberValid: Boolean
         get() = guideNumberMeters(guideNumberText, distanceUnit) != null
 
-    /** Switches dial, readings, and guide number to [unit], keeping the same physical values. */
+    /**
+     * Switches every profile's dial, readings, and guide number to [unit],
+     * keeping the same physical values. The unit is app-wide, not per profile.
+     */
     fun setDistanceUnit(unit: DistanceUnit) {
         val from = distanceUnit
         if (unit == from) return
-        guideNumberText.toDoubleOrNull()?.let { typed ->
-            guideNumberText = formatOneDecimalTrimmed(typed * from.metersPerUnit / unit.metersPerUnit)
-        }
+        guideNumberText = convertGuideNumberText(guideNumberText, from, unit)
         distanceScale = distanceScale.inUnit(unit)
+        profiles = profiles.map { it.inUnit(unit) }
     }
 
     val power: PowerStep
@@ -239,7 +242,8 @@ class GearSettingsState(
         narrowestAperture = narrowestAperture,
     )
 
-    private fun apply(profile: FlashProfile) {
+    private fun apply(saved: FlashProfile) {
+        val profile = saved.inUnit(distanceUnit)
         activeProfileId = profile.id
         profileName = profile.name
         iso = profile.iso
@@ -262,7 +266,11 @@ fun rememberGearSettings(): GearSettingsState {
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
     val state = remember {
-        val (loaded, active) = loadProfiles(prefs)
+        val (stored, active) = loadProfiles(prefs)
+        // Before the unit was app-wide, each profile had its own; the open one wins.
+        val unit = prefs.getString(KEY_UNIT, null)?.let { DistanceUnit.fromStored(it) }
+            ?: stored.first { it.id == active }.distanceScale.unit
+        val loaded = stored.map { it.inUnit(unit) }
         val current = loaded.first { it.id == active }
         GearSettingsState(
             iso = current.iso,
@@ -305,6 +313,7 @@ fun rememberGearSettings(): GearSettingsState {
         prefs.edit {
             putString(KEY_PROFILES, encodeProfiles(updated))
             putString(KEY_ACTIVE, state.activeProfileId)
+            putString(KEY_UNIT, state.distanceUnit.stored())
         }
     }
     return state
@@ -317,6 +326,21 @@ fun guideNumberMeters(text: String, unit: DistanceUnit): Double? =
 
 private fun formatOneDecimalTrimmed(value: Double): String =
     String.format(Locale.US, "%.1f", value).removeSuffix(".0")
+
+private fun convertGuideNumberText(text: String, from: DistanceUnit, to: DistanceUnit): String =
+    text.toDoubleOrNull()
+        ?.let { formatOneDecimalTrimmed(it * from.metersPerUnit / to.metersPerUnit) }
+        ?: text
+
+/** The same profile with its guide number and distance dial expressed in [unit]. */
+fun FlashProfile.inUnit(unit: DistanceUnit): FlashProfile {
+    val from = distanceScale.unit
+    if (unit == from) return this
+    return copy(
+        guideNumberText = convertGuideNumberText(guideNumberText, from, unit),
+        distanceScale = distanceScale.inUnit(unit),
+    )
+}
 
 private fun loadProfiles(prefs: android.content.SharedPreferences): Pair<List<FlashProfile>, String> {
     decodeProfiles(prefs.getString(KEY_PROFILES, null))?.let { loaded ->
