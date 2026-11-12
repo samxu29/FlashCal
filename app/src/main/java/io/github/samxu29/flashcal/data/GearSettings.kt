@@ -18,6 +18,7 @@ import io.github.samxu29.flashcal.domain.DistanceScale
 import io.github.samxu29.flashcal.domain.DistanceUnit
 import io.github.samxu29.flashcal.domain.FlashMath
 import io.github.samxu29.flashcal.domain.GodoxIm30
+import io.github.samxu29.flashcal.domain.LightMath
 import io.github.samxu29.flashcal.domain.NikonFm
 import io.github.samxu29.flashcal.domain.PowerStep
 import org.json.JSONArray
@@ -37,6 +38,12 @@ private const val KEY_PROFILES = "profiles"
 private const val KEY_ACTIVE = "active_profile"
 private const val KEY_UNIT = "distance_unit"
 
+const val MIN_FOCAL = 8
+const val MAX_FOCAL = 1200
+const val DEFAULT_FOCAL = 50
+
+enum class LensKind { PRIME, ZOOM }
+
 private val DEFAULT_APERTURES = setOf("1.4", "2", "2.8", "4", "5.6", "8", "11", "16")
 
 data class FlashProfile(
@@ -52,6 +59,14 @@ data class FlashProfile(
     val customAperture: String = "",
     val widestAperture: Double = Double.NaN,
     val narrowestAperture: Double = Double.NaN,
+    val shutterStep: ApertureStep = ApertureStep.FULL,
+    val slowestShutter: Double = LightMath.SLOWEST_SECONDS,
+    val fastestShutter: Double = LightMath.FASTEST_SECONDS,
+    val preferOver: Boolean = true,
+    val shutterPriority: Boolean = false,
+    val lensKind: LensKind = LensKind.PRIME,
+    val focalShort: Int = DEFAULT_FOCAL,
+    val focalLong: Int = DEFAULT_FOCAL,
 )
 
 @Stable
@@ -69,6 +84,14 @@ class GearSettingsState(
     customAperture: String = "",
     widestAperture: Double = Double.NaN,
     narrowestAperture: Double = Double.NaN,
+    shutterStep: ApertureStep = ApertureStep.FULL,
+    slowestShutter: Double = LightMath.SLOWEST_SECONDS,
+    fastestShutter: Double = LightMath.FASTEST_SECONDS,
+    preferOver: Boolean = true,
+    shutterPriority: Boolean = false,
+    lensKind: LensKind = LensKind.PRIME,
+    focalShort: Int = DEFAULT_FOCAL,
+    focalLong: Int = DEFAULT_FOCAL,
 ) {
     var iso by mutableIntStateOf(iso)
     var powerDenominator by mutableIntStateOf(powerDenominator)
@@ -87,6 +110,26 @@ class GearSettingsState(
     var apertureOptions by mutableStateOf(standardLabels(apertureStep, this.widestAperture, this.narrowestAperture))
         private set
     var customAperture by mutableStateOf(customAperture)
+        private set
+    var shutterStep by mutableStateOf(shutterStep)
+        private set
+    var slowestShutter by mutableDoubleStateOf(LightMath.canonicalShutter(slowestShutter, shutterStep))
+        private set
+    var fastestShutter by mutableDoubleStateOf(LightMath.canonicalShutter(fastestShutter, shutterStep))
+        private set
+
+    /** Which way auto metering rounds when the scene falls between two marks. */
+    var preferOver by mutableStateOf(preferOver)
+
+    /** Auto metering keeps the shutter and moves the aperture first, instead of the reverse. */
+    var shutterPriority by mutableStateOf(shutterPriority)
+    var lensKind by mutableStateOf(lensKind)
+        private set
+
+    /** Focal length in mm on 35 mm film; the only one for a prime, the widest end of a zoom. */
+    var focalShort by mutableIntStateOf(focalShort.coerceIn(MIN_FOCAL, MAX_FOCAL))
+        private set
+    var focalLong by mutableIntStateOf(focalLong.coerceIn(this.focalShort, MAX_FOCAL))
         private set
     var distanceScale by mutableStateOf(distanceScale)
     var profileName by mutableStateOf(profileName)
@@ -107,6 +150,14 @@ class GearSettingsState(
                 customAperture = this.customAperture,
                 widestAperture = this.widestAperture,
                 narrowestAperture = this.narrowestAperture,
+                shutterStep = this.shutterStep,
+                slowestShutter = this.slowestShutter,
+                fastestShutter = this.fastestShutter,
+                preferOver = preferOver,
+                shutterPriority = shutterPriority,
+                lensKind = lensKind,
+                focalShort = this.focalShort,
+                focalLong = this.focalLong,
             ),
         ),
     )
@@ -162,6 +213,65 @@ class GearSettingsState(
     fun setWidestAperture(value: Double): Boolean = setEndpoint(value, widest = true)
 
     fun setNarrowestAperture(value: Double): Boolean = setEndpoint(value, widest = false)
+
+    /** Printed shutter marks between the saved limits. */
+    val enabledShutters
+        get() = LightMath.shuttersInRange(shutterStep, slowestShutter, fastestShutter)
+
+    fun setShutterStep(step: ApertureStep): Boolean {
+        if (step == shutterStep) return false
+        val slow = LightMath.canonicalShutter(slowestShutter, step)
+        val fast = LightMath.canonicalShutter(fastestShutter, step)
+        shutterStep = step
+        if (slow + 1e-9 >= fast) {
+            slowestShutter = slow
+            fastestShutter = fast
+        } else {
+            slowestShutter = fast
+            fastestShutter = slow
+        }
+        return true
+    }
+
+    fun setSlowestShutter(seconds: Double): Boolean {
+        val next = LightMath.canonicalShutter(seconds, shutterStep)
+        if (next + 1e-9 < fastestShutter) return false
+        if (LightMath.sameShutter(next, slowestShutter)) return false
+        slowestShutter = next
+        return true
+    }
+
+    fun setFastestShutter(seconds: Double): Boolean {
+        val next = LightMath.canonicalShutter(seconds, shutterStep)
+        if (next > slowestShutter + 1e-9) return false
+        if (LightMath.sameShutter(next, fastestShutter)) return false
+        fastestShutter = next
+        return true
+    }
+
+    /** Focal lengths the meter frame can show: one for a prime, the zoom range otherwise. */
+    val focalRange: IntRange
+        get() = if (lensKind == LensKind.PRIME) focalShort..focalShort else focalShort..focalLong
+
+    fun selectLensKind(kind: LensKind) {
+        if (kind == lensKind) return
+        lensKind = kind
+        if (kind == LensKind.PRIME) focalLong = focalShort
+    }
+
+    fun setFocalShort(mm: Int): Boolean {
+        if (mm !in MIN_FOCAL..MAX_FOCAL) return false
+        if (lensKind == LensKind.ZOOM && mm > focalLong) return false
+        focalShort = mm
+        if (lensKind == LensKind.PRIME) focalLong = mm
+        return true
+    }
+
+    fun setFocalLong(mm: Int): Boolean {
+        if (mm !in focalShort..MAX_FOCAL) return false
+        focalLong = mm
+        return true
+    }
 
     private fun setEndpoint(value: Double, widest: Boolean): Boolean {
         val next = FlashMath.resolveAperture(FlashMath.formatApertureLabel(value))?.value ?: return false
@@ -240,6 +350,14 @@ class GearSettingsState(
         customAperture = customAperture,
         widestAperture = widestAperture,
         narrowestAperture = narrowestAperture,
+        shutterStep = shutterStep,
+        slowestShutter = slowestShutter,
+        fastestShutter = fastestShutter,
+        preferOver = preferOver,
+        shutterPriority = shutterPriority,
+        lensKind = lensKind,
+        focalShort = focalShort,
+        focalLong = focalLong,
     )
 
     private fun apply(saved: FlashProfile) {
@@ -255,6 +373,14 @@ class GearSettingsState(
         narrowestAperture = profile.narrowestAperture
         apertureOptions = standardLabels(profile.apertureStep, profile.widestAperture, profile.narrowestAperture)
         customAperture = profile.customAperture
+        shutterStep = profile.shutterStep
+        slowestShutter = LightMath.canonicalShutter(profile.slowestShutter, profile.shutterStep)
+        fastestShutter = LightMath.canonicalShutter(profile.fastestShutter, profile.shutterStep)
+        preferOver = profile.preferOver
+        shutterPriority = profile.shutterPriority
+        lensKind = profile.lensKind
+        focalShort = profile.focalShort
+        focalLong = profile.focalLong
         distanceScale = profile.distanceScale
     }
 }
@@ -286,6 +412,14 @@ fun rememberGearSettings(): GearSettingsState {
             customAperture = current.customAperture,
             widestAperture = current.widestAperture,
             narrowestAperture = current.narrowestAperture,
+            shutterStep = current.shutterStep,
+            slowestShutter = current.slowestShutter,
+            fastestShutter = current.fastestShutter,
+            preferOver = current.preferOver,
+            shutterPriority = current.shutterPriority,
+            lensKind = current.lensKind,
+            focalShort = current.focalShort,
+            focalLong = current.focalLong,
         )
     }
     LaunchedEffect(
@@ -296,6 +430,14 @@ fun rememberGearSettings(): GearSettingsState {
         state.apertureStep,
         state.widestAperture,
         state.narrowestAperture,
+        state.shutterStep,
+        state.slowestShutter,
+        state.fastestShutter,
+        state.preferOver,
+        state.shutterPriority,
+        state.lensKind,
+        state.focalShort,
+        state.focalLong,
         state.apertureOptions,
         state.customAperture,
         state.distanceScale,
@@ -395,6 +537,14 @@ private fun encodeProfiles(profiles: List<FlashProfile>): String {
                 .put("aperture_max", maxLabel)
                 .put("aperture_step", profile.apertureStep.stored())
                 .put("aperture_custom", profile.customAperture)
+                .put("shutter_step", profile.shutterStep.stored())
+                .put("shutter_slow", profile.slowestShutter)
+                .put("shutter_fast", profile.fastestShutter)
+                .put("prefer_over", profile.preferOver)
+                .put("shutter_priority", profile.shutterPriority)
+                .put("lens_kind", profile.lensKind.name.lowercase(Locale.US))
+                .put("focal_short", profile.focalShort)
+                .put("focal_long", profile.focalLong)
                 .put("distance_unit", profile.distanceScale.unit.stored())
                 .put("distance_min_cm", profile.distanceScale.minimum)
                 .put("distance_max_cm", profile.distanceScale.maximum)
@@ -445,6 +595,18 @@ private fun sanitizeProfile(item: JSONObject): FlashProfile? {
         narrowest = endpointFromLabels(apertures, step, wantWidest = false)
     }
     val custom = sanitizeCustom(item.optString("aperture_custom"))
+    val shutterStep = ApertureStep.fromStored(item.optString("shutter_step", "full"))
+    val slowestShutter = LightMath.canonicalShutter(
+        item.optDouble("shutter_slow", LightMath.SLOWEST_SECONDS),
+        shutterStep,
+    )
+    val fastestShutter = LightMath.canonicalShutter(
+        item.optDouble("shutter_fast", LightMath.FASTEST_SECONDS),
+        shutterStep,
+    )
+    val shutterSlow = maxOf(slowestShutter, fastestShutter)
+    val focalShort = item.optInt("focal_short", DEFAULT_FOCAL).coerceIn(MIN_FOCAL, MAX_FOCAL)
+    val shutterFast = minOf(slowestShutter, fastestShutter)
     val iso = item.optInt("iso", 100).takeIf { it in NikonFm.FILM_SPEEDS } ?: 100
     val power = item.optInt("power", 1)
     val aperture = item.optString("aperture", "4")
@@ -465,6 +627,14 @@ private fun sanitizeProfile(item: JSONObject): FlashProfile? {
         narrowestAperture = narrowest,
         apertureStep = step,
         customAperture = custom,
+        shutterStep = shutterStep,
+        slowestShutter = shutterSlow,
+        fastestShutter = shutterFast,
+        preferOver = item.optBoolean("prefer_over", true),
+        shutterPriority = item.optBoolean("shutter_priority", false),
+        lensKind = if (item.optString("lens_kind") == "zoom") LensKind.ZOOM else LensKind.PRIME,
+        focalShort = focalShort,
+        focalLong = item.optInt("focal_long", focalShort).coerceIn(focalShort, MAX_FOCAL),
         distanceScale = runCatching {
             // Keys keep their legacy "_cm" names; values are hundredths of distance_unit.
             DistanceScale(

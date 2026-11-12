@@ -21,12 +21,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Exposure
 import androidx.compose.material.icons.outlined.Camera
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FlashOn
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Iso
+import androidx.compose.material.icons.outlined.Lens
+import androidx.compose.material.icons.outlined.ShutterSpeed
 import androidx.compose.material.icons.outlined.SquareFoot
 import androidx.compose.material.icons.outlined.Straighten
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -52,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,12 +65,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.samxu29.flashcal.R
 import io.github.samxu29.flashcal.data.GearSettingsState
+import io.github.samxu29.flashcal.data.LensKind
+import io.github.samxu29.flashcal.data.MAX_FOCAL
+import io.github.samxu29.flashcal.data.MIN_FOCAL
 import io.github.samxu29.flashcal.domain.ApertureStep
 import io.github.samxu29.flashcal.domain.ApertureStop
 import io.github.samxu29.flashcal.domain.DistanceScale
 import io.github.samxu29.flashcal.domain.DistanceUnit
 import io.github.samxu29.flashcal.domain.FlashMath
 import io.github.samxu29.flashcal.domain.GodoxIm30
+import io.github.samxu29.flashcal.domain.LightMath
+import io.github.samxu29.flashcal.ar.ViewField
+import io.github.samxu29.flashcal.meter.widestFittingFocal
+import io.github.samxu29.flashcal.meter.widestPreviewFocal
+import kotlin.math.atan
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 private val DialStrip = Color(0xFF1B2026)
 
@@ -185,6 +201,154 @@ fun ApertureRangeSettings(settings: GearSettingsState) {
         Hint(stringResource(R.string.aperture_type_help), Icons.Outlined.Edit)
         val stops = settings.enabledApertures
         DialPreview(stops.size) { index -> "f/${stops[index].label}" }
+    }
+}
+
+@Composable
+fun ShutterRangeSettings(settings: GearSettingsState) {
+    val scale = LightMath.shutterScale(settings.shutterStep)
+    val slowest = scale.filter { it.seconds + 1e-9 >= settings.fastestShutter }
+    val fastest = scale.filter { it.seconds <= settings.slowestShutter + 1e-9 }
+    SettingsSection(Icons.Outlined.ShutterSpeed, stringResource(R.string.shutter_range)) {
+        SettingMenu(
+            label = stringResource(R.string.aperture_increment),
+            value = stringResource(stepLabel(settings.shutterStep)),
+            options = ApertureStep.entries.map { stringResource(stepLabel(it)) },
+            onSelect = { index -> settings.setShutterStep(ApertureStep.entries[index]) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SettingMenu(
+                label = stringResource(R.string.shutter_slowest),
+                value = slowest.firstOrNull { LightMath.sameShutter(it.seconds, settings.slowestShutter) }?.label
+                    ?: slowest.first().label,
+                options = slowest.map { it.label },
+                onSelect = { index -> settings.setSlowestShutter(slowest[index].seconds) },
+                modifier = Modifier.weight(1f),
+            )
+            SettingMenu(
+                label = stringResource(R.string.shutter_fastest),
+                value = fastest.firstOrNull { LightMath.sameShutter(it.seconds, settings.fastestShutter) }?.label
+                    ?: fastest.last().label,
+                options = fastest.map { it.label },
+                onSelect = { index -> settings.setFastestShutter(fastest[index].seconds) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        val marks = settings.enabledShutters
+        DialPreview(marks.size) { index -> marks[index].label }
+    }
+}
+
+/**
+ * The camera lens as one focal length on 35 mm film; on a zoom, the one being
+ * shot at. The Camera tab draws vertical frame lines for that angle of view.
+ * A disclaimer always shows that they are approximate, and a yellow warning
+ * appears when the widest setting's frame does not fit the preview. That
+ * uses the preview's real field once the Camera tab has run ([previewField]),
+ * and an estimate from the camera's sensor before then.
+ */
+@Composable
+fun LensSettings(settings: GearSettingsState, previewField: ViewField? = null) {
+    val context = LocalContext.current
+    val widest = remember(context, previewField) {
+        previewField?.let { widestFittingFocal(it.tanHalfWidth.toDouble(), it.tanHalfHeight.toDouble()) }
+            ?: context.resources.displayMetrics.let { widestPreviewFocal(context, it.widthPixels, it.heightPixels) }
+    }
+    SettingsSection(Icons.Outlined.Lens, stringResource(R.string.lens_section)) {
+        FocalField(
+            saved = settings.focalShort,
+            label = stringResource(R.string.lens_focal),
+            key = "${settings.activeProfileId}-focal",
+            onCommit = { mm ->
+                // One focal length now; a profile saved as a zoom keeps its widest until changed.
+                settings.selectLensKind(LensKind.PRIME)
+                settings.setFocalShort(mm)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Hint(stringResource(R.string.lens_angle, angleOfView(settings.focalShort)))
+        Hint(stringResource(R.string.lens_zoom_hint))
+        if (widest != null && settings.focalShort < widest) {
+            LensWarning(stringResource(R.string.lens_too_wide, ceil(widest).toInt()))
+        }
+        Hint(stringResource(R.string.lens_disclaimer), Icons.Outlined.Info)
+    }
+}
+
+@Composable
+private fun LensWarning(text: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(WarningAmber, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Outlined.WarningAmber, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+        Text(text, color = Color.Black, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Horizontal × vertical angle of view on a 36 × 24 mm frame, in whole degrees. */
+private fun angleOfView(focalMm: Int): String {
+    fun degrees(halfMm: Double) = Math.toDegrees(2.0 * atan(halfMm / focalMm)).roundToInt()
+    return "${degrees(18.0)}° × ${degrees(12.0)}°"
+}
+
+@Composable
+private fun FocalField(
+    saved: Int,
+    label: String,
+    key: String,
+    onCommit: (Int) -> Boolean,
+    modifier: Modifier = Modifier,
+) {
+    var draft by rememberSaveable(key) { mutableStateOf(saved.toString()) }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(saved, focused) {
+        if (!focused) draft = saved.toString()
+    }
+    val parsed = draft.toIntOrNull()
+    val error = when {
+        draft.isEmpty() -> null
+        parsed == null || parsed !in MIN_FOCAL..MAX_FOCAL -> stringResource(R.string.lens_focal_error, MIN_FOCAL, MAX_FOCAL)
+        else -> null
+    }
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { raw ->
+            val cleaned = raw.filter { it.isDigit() }.take(4)
+            draft = cleaned
+            cleaned.toIntOrNull()?.let { if (it in MIN_FOCAL..MAX_FOCAL) onCommit(it) }
+        },
+        label = { Text(label) },
+        suffix = { Text("mm") },
+        modifier = modifier.onFocusChanged { focused = it.isFocused },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        isError = error != null,
+        supportingText = error?.let { { Text(it) } },
+    )
+}
+
+@Composable
+fun AutoMeterSettings(settings: GearSettingsState) {
+    SettingsSection(Icons.Outlined.Exposure, stringResource(R.string.auto_meter)) {
+        val choices = listOf(true to R.string.auto_meter_over, false to R.string.auto_meter_under)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            choices.forEachIndexed { index, (over, label) ->
+                SegmentedButton(
+                    selected = settings.preferOver == over,
+                    onClick = confirmationClick { settings.preferOver = over },
+                    shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+                ) {
+                    Text(stringResource(label))
+                }
+            }
+        }
+        Hint(stringResource(R.string.auto_meter_hint))
     }
 }
 

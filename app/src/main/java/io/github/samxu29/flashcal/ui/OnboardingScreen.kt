@@ -69,7 +69,13 @@ fun OnboardingScreen(onFinish: () -> Unit) {
     }
     BackHandler(enabled = page > 0) { page-- }
     SystemBarIconStyle(onDarkBackground = false)
-    val titles = listOf(R.string.onboard_camera_title, R.string.onboard_profile_title, R.string.onboard_dials_title, R.string.onboard_controls_title)
+    val titles = listOf(
+        R.string.onboard_camera_title,
+        R.string.onboard_profile_title,
+        R.string.onboard_dials_title,
+        R.string.onboard_controls_title,
+        R.string.onboard_scene_title,
+    )
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
@@ -85,7 +91,8 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                         0 -> CameraPagePreview()
                         1 -> ProfilePagePreview()
                         2 -> DialsPagePreview()
-                        else -> ControlsPagePreview()
+                        3 -> ControlsPagePreview()
+                        else -> ScenePagePreview()
                     }
                     Text(stringResource(titles[step]), style = MaterialTheme.typography.headlineSmall)
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -93,7 +100,8 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                             0 -> CameraPageRows()
                             1 -> ProfilePageRows()
                             2 -> DialsPageRows()
-                            else -> ControlsPageRows()
+                            3 -> ControlsPageRows()
+                            else -> ScenePageRows()
                         }
                     }
                     if (step == 0) {

@@ -2,12 +2,19 @@
  * Picture-first onboarding pages.
  *
  * Each page opens with a small replica of the real screen it describes, drawn
- * with the same shapes and colors as Measure, Manual, and Settings, so it
- * reads like a cropped screenshot but stays sharp and in step with the UI.
+ * with the same shapes and colors as the Camera, Manual, and Settings tabs, so it
+ * reads like a cropped screenshot but stays sharp and in step with the UI. The
+ * camera previews move: the real needle, light ball and falloff badge animate
+ * through sample readings, so each one is understood by watching it.
  * Below it, every feature is one short line next to the control it names.
  */
 package io.github.samxu29.flashcal.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +23,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -25,14 +33,25 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.BrightnessAuto
 import androidx.compose.material.icons.outlined.Camera
+import androidx.compose.material.icons.outlined.ScreenRotation
+import androidx.compose.material.icons.outlined.SwipeDown
+import androidx.compose.material.icons.outlined.SwipeUp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.outlined.CropFree
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Exposure
 import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material.icons.outlined.FlashlightOff
 import androidx.compose.material.icons.outlined.Iso
+import androidx.compose.material.icons.outlined.Lens
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.ShutterSpeed
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.Swipe
 import androidx.compose.material.icons.outlined.TouchApp
@@ -50,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -60,19 +80,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.samxu29.flashcal.R
+import io.github.samxu29.flashcal.ar.LightCue
+import io.github.samxu29.flashcal.ar.SpotClip
 import io.github.samxu29.flashcal.domain.DistanceUnit
 import io.github.samxu29.flashcal.domain.FlashMath
 import io.github.samxu29.flashcal.domain.GodoxIm30
 import io.github.samxu29.flashcal.domain.PowerFit
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 private val ScreenGlass = Color.White.copy(alpha = 0.18f)
 private val ScreenScene = Brush.verticalGradient(listOf(Color(0xFF4A5866), Color(0xFF242B33), Color(0xFF15191E)))
 private const val SAMPLE_ISO = 400
 private const val SAMPLE_METERS = 2.5
 
-/** Camera page: the Measure view aimed at a subject, with a live distance under the cross. */
+/** Camera page: the ring settles on a subject, a tap anchors it, and its distance appears. */
 @Composable
 fun CameraPagePreview() {
+    val time by rememberInfiniteTransition().animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(3600, easing = LinearEasing)),
+    )
     ScreenFrame(Modifier.height(200.dp)) {
         Icon(
             Icons.Outlined.Person,
@@ -80,17 +110,31 @@ fun CameraPagePreview() {
             tint = Color.White.copy(alpha = 0.16f),
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 40.dp).size(140.dp),
         )
-        CenterCross(Modifier.align(Alignment.CenterStart).padding(start = 92.dp))
-        Column(
-            Modifier.align(Alignment.CenterEnd).padding(end = 40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            DistancePill("2.4")
-            Text(
-                stringResource(R.string.distance_secondary, distanceText(2.4f, DistanceUnit.FEET), stringResource(R.string.source_depth)),
-                color = Color.White.copy(alpha = 0.9f),
-                style = MaterialTheme.typography.labelMedium,
-            )
+        // Aiming at the center, then a tap on the subject, then tracked on it.
+        val tracked = time >= 0.42f
+        Canvas(Modifier.matchParentSize()) {
+            val subject = Offset(110.dp.toPx(), size.height / 2f - 18.dp.toPx())
+            val ring = 22.dp.toPx()
+            val shade = Color.Black.copy(alpha = 0.45f)
+            if (!tracked) {
+                val pulse = 0.6f + 0.4f * sin(time * 40f).coerceAtLeast(0f)
+                drawCircle(shade, ring, center, style = Stroke(3.dp.toPx()))
+                drawCircle(Color.White.copy(alpha = pulse), ring, center, style = Stroke(1.dp.toPx()))
+            } else {
+                drawCircle(Color.White.copy(alpha = 0.45f), 4.dp.toPx(), center)
+                drawCircle(shade, ring, subject, style = Stroke(4.dp.toPx()))
+                drawCircle(Color.White, ring, subject, style = Stroke(2.dp.toPx()))
+                drawCircle(Color.White, 3.dp.toPx(), subject)
+            }
+            if (time in 0.35f..0.6f) {
+                val t = (time - 0.35f) / 0.25f
+                drawCircle(Color.White.copy(alpha = 0.6f * (1f - t)), 8.dp.toPx() + 30.dp.toPx() * t, subject)
+            }
+        }
+        if (tracked) {
+            Box(Modifier.align(Alignment.CenterStart).padding(start = 82.dp).offset(y = 44.dp)) {
+                DistancePill("2.4")
+            }
         }
     }
 }
@@ -120,14 +164,15 @@ fun ProfilePagePreview() {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null)
+                    Icon(Icons.Outlined.Edit, contentDescription = null)
                 }
             }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf("ISO $SAMPLE_ISO", "GN 15", "f/1.4–16", "0.5–10 m").forEach { SampleChip(it) }
+                listOf("ISO $SAMPLE_ISO", "GN 15", "f/1.4–16", "0.5–10 m", "50 mm", stringResource(R.string.auto_meter_over), "30s–1/8000")
+                    .forEach { SampleChip(it) }
             }
         }
     }
@@ -179,41 +224,107 @@ fun DialsPagePreview() {
     }
 }
 
-/** Controls page: the Measure screen corners and center, where each control lives. */
+/** Controls page: the bottom bar as on the Camera tab, with the hold button tapped on and off. */
 @Composable
 fun ControlsPagePreview() {
+    val press by rememberInfiniteTransition().animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing)),
+    )
     ScreenFrame(Modifier.height(200.dp)) {
-        GlassCircle(Icons.Outlined.Straighten, Modifier.align(Alignment.TopStart).padding(12.dp))
-        GlassCircle(Icons.Outlined.FlashlightOff, Modifier.align(Alignment.TopEnd).padding(12.dp))
-        CenterCross(Modifier.align(Alignment.Center))
         Column(
-            Modifier.align(Alignment.Center).offset(y = 52.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.align(Alignment.TopEnd).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            DistancePill("2.4", held = true)
-            Text(
-                stringResource(R.string.distance_secondary, distanceText(2.4f, DistanceUnit.FEET), stringResource(R.string.source_held)),
-                color = Color.White.copy(alpha = 0.9f),
-                style = MaterialTheme.typography.labelMedium,
-            )
+            GlassCircle(Icons.Outlined.FlashlightOff)
         }
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(12.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.Black.copy(alpha = 0.38f))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlassCircle(Icons.Outlined.Straighten)
+            Spacer(Modifier.width(8.dp))
+            GlassCircle(Icons.Outlined.RestartAlt)
+            Spacer(Modifier.weight(1f))
+            // A tap freezes the reading, another releases it.
+            if (press > 0.5f) LockCircle() else GlassCircle(Icons.Outlined.LockOpen)
+            Spacer(Modifier.weight(1f))
+            LetterCircle("A")
+            Spacer(Modifier.width(8.dp))
+            GlassCircle(Icons.Outlined.BrightnessAuto)
+        }
+    }
+}
+
+/** Scene page: flash power, the ambient needle, the light ball, falloff and frame lines, all moving. */
+@Composable
+fun ScenePagePreview() {
+    val time by rememberInfiniteTransition().animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing)),
+    )
+    ScreenFrame(Modifier.height(240.dp)) {
+        Canvas(Modifier.matchParentSize()) {
+            // Vertical frame lines, as on the Camera tab.
+            val h = size.height * 0.62f
+            val w = h * 2f / 3f
+            val top = (size.height - h) / 2f + 22.dp.toPx()
+            drawRect(Color.White.copy(alpha = 0.7f), Offset((size.width - w) / 2f, top), Size(w, h), style = Stroke(1.dp.toPx()))
+        }
+        Column(
+            Modifier.align(Alignment.TopCenter).padding(top = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(Icons.Outlined.FlashOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Text(
+                    "1/8",
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum", fontWeight = FontWeight.Medium),
+                )
+            }
+            ExposureNeedle(over = 1.6 * sin(time.toDouble()), clip = SpotClip.NONE, disabled = false)
+        }
+        Column(
+            Modifier.align(Alignment.TopStart).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LightBall(LightCue(cos(time), 0.5f, sin(time) * 0.8f, 0.6f))
+            FalloffBadge(1.5 + 1.2 * sin(time.toDouble() * 0.5))
+        }
+        Box(Modifier.align(Alignment.Center).offset(y = 24.dp)) { CenterCross() }
     }
 }
 
 @Composable
 fun CameraPageRows() {
-    FeatureRow(Icons.Outlined.PhotoCamera, R.string.onboard_camera_aim)
+    FeatureRow(R.string.onboard_camera_aim) { DarkCross() }
+    FeatureRow(Icons.Outlined.TouchApp, R.string.onboard_camera_track)
+    FeatureRow(R.string.onboard_camera_untrack) { DarkCross() }
     FeatureRow(Icons.Outlined.FlashOn, R.string.onboard_camera_hold)
     FeatureRow(Icons.Outlined.Straighten, R.string.onboard_camera_manual)
 }
 
 @Composable
 fun ProfilePageRows() {
-    FeatureRow(Icons.Outlined.Settings, R.string.onboard_profile_open)
+    FeatureRow(Icons.Outlined.TouchApp, R.string.onboard_profile_open)
+    FeatureRow(Icons.Outlined.Edit, R.string.onboard_profile_edit)
     FeatureRow(Icons.Outlined.Iso, R.string.onboard_profile_iso)
     FeatureRow(Icons.Outlined.FlashOn, R.string.onboard_profile_gn)
     FeatureRow(Icons.Outlined.Camera, R.string.onboard_profile_aperture)
     FeatureRow(Icons.Outlined.Straighten, R.string.onboard_profile_distance)
+    FeatureRow(Icons.Outlined.Lens, R.string.onboard_profile_lens)
+    FeatureRow(Icons.Outlined.BrightnessAuto, R.string.onboard_profile_lean)
+    FeatureRow(Icons.Outlined.ShutterSpeed, R.string.onboard_profile_shutter)
 }
 
 @Composable
@@ -225,18 +336,34 @@ fun DialsPageRows() {
 
 @Composable
 fun ControlsPageRows() {
-    val slot = 132.dp
-    FeatureRow(R.string.onboard_controls_fixed, slot) { GlassCircle(Icons.Outlined.Straighten, dark = true) }
-    FeatureRow(R.string.onboard_controls_hold, slot) { DarkChip { DistancePill("2.4", compact = true, held = true) } }
-    FeatureRow(R.string.onboard_controls_light, slot) { GlassCircle(Icons.Outlined.FlashlightOff, dark = true) }
-    FeatureRow(R.string.onboard_controls_warning, slot) {
+    FeatureRow(R.string.onboard_controls_fixed) { GlassCircle(Icons.Outlined.Straighten, dark = true) }
+    FeatureRow(R.string.onboard_controls_reset) { GlassCircle(Icons.Outlined.RestartAlt, dark = true) }
+    FeatureRow(R.string.onboard_controls_hold) { LockCircle(dark = true) }
+    FeatureRow(R.string.onboard_controls_priority) { LetterCircle("A", dark = true) }
+    FeatureRow(R.string.onboard_controls_auto) { GlassCircle(Icons.Outlined.BrightnessAuto, dark = true) }
+    FeatureRow(R.string.onboard_controls_light) { GlassCircle(Icons.Outlined.FlashlightOff, dark = true) }
+    FeatureRow(R.string.onboard_controls_frame) { GlassCircle(Icons.Outlined.SwipeDown, dark = true) }
+    FeatureRow(R.string.onboard_controls_frame_back) { GlassCircle(Icons.Outlined.SwipeUp, dark = true) }
+    FeatureRow(R.string.onboard_controls_warning, slot = null) {
         WarningPill(stringResource(R.string.onboard_warning_sample))
     }
 }
 
 @Composable
-private fun FeatureRow(icon: ImageVector, text: Int) {
-    FeatureRow(text) {
+fun ScenePageRows() {
+    FeatureRow(Icons.Outlined.FlashOn, R.string.onboard_scene_power)
+    FeatureRow(Icons.Outlined.Exposure, R.string.onboard_scene_needle)
+    FeatureRow(R.string.onboard_scene_light) { LightBall(LightCue(-0.6f, 0.6f, 0.5f, 0.6f)) }
+    FeatureRow(R.string.onboard_scene_mark) { LightBall(LightCue(0.7f, 0.5f, 0.3f, 0.7f), marked = true) }
+    FeatureRow(R.string.onboard_scene_falloff) { DarkChip { FalloffBadge(2.0) } }
+    FeatureRow(Icons.Outlined.CropFree, R.string.onboard_scene_frame)
+    FeatureRow(Icons.Outlined.ScreenRotation, R.string.onboard_scene_turn)
+    FeatureRow(Icons.Outlined.Lens, R.string.onboard_scene_zoom)
+}
+
+@Composable
+private fun FeatureRow(icon: ImageVector, text: Int, slot: Dp? = 48.dp) {
+    FeatureRow(text, slot) {
         Box(
             Modifier
                 .size(44.dp)
@@ -249,14 +376,21 @@ private fun FeatureRow(icon: ImageVector, text: Int) {
 }
 
 @Composable
-private fun FeatureRow(text: Int, slot: Dp = 44.dp, leading: @Composable () -> Unit) {
+private fun FeatureRow(text: Int, slot: Dp? = 48.dp, leading: @Composable () -> Unit) {
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Box(Modifier.width(slot), contentAlignment = Alignment.Center) { leading() }
-        Text(stringResource(text), style = MaterialTheme.typography.titleMedium)
+        Box(if (slot != null) Modifier.width(slot) else Modifier, contentAlignment = Alignment.Center) { leading() }
+        // One line per feature: the strings are kept short enough to fit.
+        Text(
+            stringResource(text),
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -301,6 +435,19 @@ private fun DistancePill(meters: String, compact: Boolean = false, held: Boolean
     )
 }
 
+/** The Meter screen's A/S priority button. */
+@Composable
+private fun LetterCircle(letter: String, modifier: Modifier = Modifier, dark: Boolean = false) {
+    Box(
+        modifier
+            .size(if (dark) 44.dp else 40.dp)
+            .background(if (dark) Color(0xFF242B33) else ScreenGlass, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(letter, color = Color.White, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
+    }
+}
+
 @Composable
 private fun GlassCircle(icon: ImageVector, modifier: Modifier = Modifier, dark: Boolean = false) {
     Box(
@@ -310,6 +457,34 @@ private fun GlassCircle(icon: ImageVector, modifier: Modifier = Modifier, dark: 
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** The meter's lock in its held state, as on the Meter screen. */
+@Composable
+private fun LockCircle(dark: Boolean = false) {
+    Box(
+        Modifier
+            .size(if (dark) 44.dp else 36.dp)
+            .background(if (dark) Color(0xFF242B33) else Color.Transparent, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(if (dark) 32.dp else 36.dp)
+                .background(Color.White.copy(alpha = 0.92f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Lock, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** The center cross on a dark disc, readable on the light onboarding page. */
+@Composable
+private fun DarkCross() {
+    Box(Modifier.size(44.dp).background(Color(0xFF242B33), CircleShape), contentAlignment = Alignment.Center) {
+        CenterCross()
     }
 }
 

@@ -24,14 +24,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.samxu29.flashcal.R
+import io.github.samxu29.flashcal.ar.ViewField
 import io.github.samxu29.flashcal.data.GearSettingsState
 import io.github.samxu29.flashcal.data.guideNumberMeters
 import io.github.samxu29.flashcal.domain.GodoxIm30
@@ -59,6 +61,7 @@ fun GearScreen(
     settings: GearSettingsState,
     modifier: Modifier = Modifier,
     onShowOnboarding: () -> Unit = {},
+    previewField: ViewField? = null,
 ) {
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     if (editingId != null && settings.profiles.none { it.id == editingId }) {
@@ -97,6 +100,7 @@ fun GearScreen(
         } else {
             ProfileEditor(
                 settings = settings,
+                previewField = previewField,
                 onBack = { editingId = null },
                 onDelete = {
                     settings.deleteProfile(settings.activeProfileId)
@@ -142,10 +146,15 @@ private fun ProfileList(
                 settings.profiles.forEach { profile ->
                     val selected = profile.id == settings.activeProfileId
                     val name = if (selected) settings.profileName.ifBlank { profile.name } else profile.name
+                    // Tapping a profile makes it the one in use; the pencil opens its settings.
+                    val selectDescription = stringResource(R.string.profile_select, name)
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(onClick = confirmationClick { onOpen(profile.id) }),
+                            .clickable(
+                                onClickLabel = selectDescription,
+                                onClick = confirmationClick { settings.selectProfile(profile.id) },
+                            ),
                         shape = RoundedCornerShape(16.dp),
                         color = if (selected) {
                             MaterialTheme.colorScheme.secondaryContainer
@@ -159,9 +168,10 @@ private fun ProfileList(
                         },
                     ) {
                         Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            Modifier.padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(horizontal = 12.dp))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(name, style = MaterialTheme.typography.titleMedium)
                                 val unit = settings.distanceUnit
@@ -179,10 +189,12 @@ private fun ProfileList(
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                             }
-                            Icon(
-                                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                                contentDescription = stringResource(R.string.profile_open, name),
-                            )
+                            IconButton(onClick = confirmationClick { onOpen(profile.id) }) {
+                                Icon(
+                                    Icons.Outlined.Edit,
+                                    contentDescription = stringResource(R.string.profile_open, name),
+                                )
+                            }
                         }
                     }
                 }
@@ -203,6 +215,7 @@ private fun ProfileList(
 @Composable
 private fun ProfileEditor(
     settings: GearSettingsState,
+    previewField: ViewField?,
     onBack: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
@@ -235,10 +248,13 @@ private fun ProfileEditor(
             label = { Text(stringResource(R.string.profile_name)) },
             singleLine = true,
         )
-        FlashSettings(settings)
         FilmSettings(settings)
+        FlashSettings(settings)
         ApertureRangeSettings(settings)
         DistanceRangeSettings(settings)
+        LensSettings(settings, previewField)
+        AutoMeterSettings(settings)
+        ShutterRangeSettings(settings)
         if (settings.profiles.size > 1) {
             var confirmDelete by rememberSaveable { mutableStateOf(false) }
             val profileLabel = settings.profileName.ifBlank { stringResource(R.string.profile_name) }
